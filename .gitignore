@@ -1,0 +1,19 @@
+# Generated data is never committed — only the code that generates it.
+data/
+*.parquet
+*.duckdb
+*.dump
+*.sql.gz
+
+# Secrets
+.env
+
+# Tool output
+schemaspy/output/
+
+# Python
+__pycache__/
+.venv/
+
+# macOS
+.DS_Store

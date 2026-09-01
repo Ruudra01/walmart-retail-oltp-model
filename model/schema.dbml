@@ -1,0 +1,61 @@
+// ---------------------------------------------------------------------------
+// Logical model — retail point-of-sale, 3NF.
+//
+// What belongs here: entities, their attributes, keys, and relationships, in
+// third normal form. This is the logical phase: it comes after docs/conceptual.md
+// is agreed and before any migration is written. The DDL in migrations/ is
+// derived from this file, never the reverse.
+//
+// Done when: every entity in docs/conceptual.md appears here with attributes and
+// a key; every relationship has an explicit Ref with cardinality; every table
+// and column has a Note; 3NF holds with no transitive dependency anyone has to
+// defend; and every business term used matches docs/glossary.md exactly.
+//
+// Must NOT go here: Postgres-specific types, indexes, partitions, tablespaces,
+// storage parameters, or anything about performance — those are physical, they
+// live in the migration. No facts, no dimensions, no star schemas, ever: this is
+// the source system.
+//
+// ---------------------------------------------------------------------------
+// Conventions
+//
+// Naming
+//   tables            singular, snake_case, business language: transaction_line
+//                     not TransactionLines, not txn_ln
+//   columns           snake_case; no table-name prefix (transaction.id, not
+//                     transaction.transaction_id)
+//   primary key       id
+//   foreign key       <referenced_table>_id
+//   booleans          is_ / has_ prefix
+//   timestamps        _at suffix (system time); dates _date suffix (business time)
+//   money             amount / _amount suffix, with the currency stated in a Note
+//   no abbreviations  qty, txn, cust, amt are all rejected in review
+//   reserved words    never used as identifiers, not even quoted
+//
+// Types (logical, not Postgres)
+//   text, integer, decimal(p,s), boolean, date, timestamp, uuid
+//   Map to Postgres in the migration, not here.
+//
+// Notes
+//   Every table and every column carries a Note. The Note text is what becomes
+//   the COMMENT ON in the migration — write it once, here, and carry it across.
+//   A column whose Note only restates its name is not documented.
+//
+// Relationships
+//   One Ref per relationship, cardinality explicit (>, <, -, <>). Resolve
+//   many-to-many with a named associative entity that has its own business
+//   meaning — if you cannot name it in business language, the relationship is
+//   wrong.
+//
+// Enums
+//   Use an Enum only for a closed set the business controls and rarely changes.
+//   Anything a store manager can add to is a lookup table, not an Enum.
+//
+// ---------------------------------------------------------------------------
+
+Project retail_oltp {
+  database_type: 'PostgreSQL'
+  Note: 'Source system for retail point-of-sale. 3NF OLTP. Not a warehouse.'
+}
+
+// No entities yet — the conceptual phase is not finished.

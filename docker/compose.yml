@@ -1,0 +1,27 @@
+# Local Postgres for development. Credentials come from .env in the repo root
+# (gitignored); copy .env.example to .env first. Never hardcode a password here.
+#
+# No ${VAR} interpolation on purpose: the container reads env_file directly, so
+# there is nothing to resolve at compose-parse time and no second copy of the
+# values to keep in sync.
+#
+# Not a production configuration and not a template for one.
+
+name: retail-oltp
+
+services:
+  postgres:
+    image: postgres:16
+    env_file: ../.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

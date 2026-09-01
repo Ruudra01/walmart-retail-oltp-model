@@ -1,0 +1,21 @@
+# Ownership by directory. Each pattern's owners are auto-requested on PRs
+# touching it. Later patterns win, so keep the catch-all first.
+#
+# To fill in: replace each PLACEHOLDER with @username or @org/team. Teams need
+# write access to the repo or GitHub silently ignores them. Owners must be able
+# to review the phase they own — the glossary owner settles what a word means,
+# the migration owners settle whether a schema change is sound.
+#
+# Delete a line rather than leave a PLACEHOLDER: an unresolvable owner blocks
+# nothing and reviews nothing.
+
+* @PLACEHOLDER
+
+docs/glossary.md     @PLACEHOLDER
+docs/handoff-contract.md @PLACEHOLDER
+docs/decisions/      @PLACEHOLDER
+
+model/               @PLACEHOLDER
+migrations/          @PLACEHOLDER
+tests/               @PLACEHOLDER
+generator/           @PLACEHOLDER

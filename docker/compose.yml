@@ -5,13 +5,17 @@
 # there is nothing to resolve at compose-parse time and no second copy of the
 # values to keep in sync.
 #
+# Built from docker/Dockerfile (postgres:16 + pgTAP) rather than the stock
+# image, because tests/constraints/ needs pgTAP on the server.
+#
 # Not a production configuration and not a template for one.
 
 name: retail-oltp
 
 services:
   postgres:
-    image: postgres:16
+    build: .
+    image: retail-oltp-pg
     env_file: ../.env
     ports:
       - "5432:5432"

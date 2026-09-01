@@ -1,0 +1,9 @@
+# Pin exact versions with ==, never >= or ~=. This runs on four laptops, in CI,
+# and on whatever machine regenerates the handoff a year from now; they must all
+# produce byte-identical data from the same seed. A floating version silently
+# changes a random number generator and the reproducibility guarantee is gone.
+#
+# Add a dependency only when the standard library genuinely cannot do the job.
+# Regenerate the handoff and re-run `make test-data` after any version change.
+#
+# psycopg[binary]==3.x.y

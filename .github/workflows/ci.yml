@@ -1,0 +1,63 @@
+# Enforces the forward-only migration rule: every PR rebuilds the schema from
+# an empty database using only the files in migrations/. A migration that has
+# been edited after merge, or that depends on hand-applied state, fails here.
+#
+# The database is built from docker/Dockerfile rather than declared as a
+# `services:` image, because the constraint tests need pgTAP installed on the
+# server and the stock postgres:16 image does not have it.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+
+    env:
+      POSTGRES_DB: retail_oltp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: retail_oltp
+      PGUSER: postgres
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Postgres image with pgTAP
+        run: docker build -t retail-oltp-pg docker/
+
+      - name: Start a clean database
+        run: |
+          docker run -d --name pg \
+            -e POSTGRES_DB="$POSTGRES_DB" \
+            -e POSTGRES_USER="$POSTGRES_USER" \
+            -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            -p 5432:5432 \
+            retail-oltp-pg
+
+      - name: Wait for it
+        run: |
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" && exit 0
+            sleep 2
+          done
+          echo "database never became ready"; docker logs pg; exit 1
+
+      - name: Apply migrations from empty
+        run: make migrate
+
+      - name: Load seeds
+        run: make seed
+
+      - name: Constraint tests
+        run: make test-constraints
+
+      - name: Lint SQL
+        run: make lint

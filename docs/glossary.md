@@ -17,14 +17,19 @@ OLAP team, it is theirs to define.
 
 | Term | Definition | Owner | Status |
 |------|------------|-------|--------|
-| transaction | | | Draft |
-| sale | | | Draft |
-| void | | | Draft |
-| return | | | Draft |
-| trip | | | Draft |
-| customer | | | Draft |
-| business date | | | Draft |
-| store | | | Draft |
+| transaction | One ORDER instance — a single sale or a single return, from first item scanned to settlement. A failed payment attempt is not a transaction; it leaves no ORDER | Rushitha Chandaluri | Draft |
+| sale | An ORDER whose type is sale: the whole basket, not one line of it. A single line is an ORDER_ITEM | Rushitha Chandaluri | Draft |
+| void | Cancellation of a line or a whole basket *before* it becomes a financial record. Reversal *after* tender is a return, not a void — the two are different words for different acts. Whether a void leaves an ORDER behind is open question 2 in `conceptual.md` | Rushitha Chandaluri | Draft |
+| return | An ORDER that reverses items previously sold. Each returned ORDER_ITEM *optionally* references the original item it reverses; no-receipt returns carry no reference at all | Rushitha Chandaluri | Draft |
+| trip | One customer's single visit to one store. Not an entity in this model — a trip may produce more than one ORDER (paying twice is two transactions, one trip), and the model does not attempt to group them | Rushitha Chandaluri | Draft |
+| customer | The identified party associated with a purchase, not merely the party standing at the register. Optional on every relationship: anonymous in-store baskets and guest checkouts have no CUSTOMER | Rushitha Chandaluri | Draft |
+| business date | The trading day an ORDER is attributed to, in the store's own local timezone. Distinct from the system timestamp that records when the row was written; a late-night sale can belong to the prior business date. The end-of-day cutoff is not yet settled | Rushitha Chandaluri | Draft |
+| store | A location that holds stock or processes a sale, physical or virtual. Not a legal entity and not a reporting rollup — both of those are the OLAP team's concern | Rushitha Chandaluri | Draft |
+
+All eight rows are `Draft` and owned by the author pending review. Ownership
+should be reassigned to whoever actually settles each argument — the point of
+the Owner column is that a named person can adjudicate, and the author cannot
+adjudicate against themselves.
 
 Questions each seeded term has to survive:
 

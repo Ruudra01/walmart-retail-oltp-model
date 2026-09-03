@@ -58,4 +58,197 @@ Project retail_oltp {
   Note: 'Source system for retail point-of-sale. 3NF OLTP. Not a warehouse.'
 }
 
-// No entities yet — the conceptual phase is not finished.
+// ---------------------------------------------------------------------------
+// Phase-2 decisions made while translating docs/conceptual.md
+//
+// Four places below make a call the conceptual model left to this phase. Each
+// is recorded as a real decision, not just a note — an ADR where the choice is
+// hard to reverse, an in-place update to conceptual.md where it isn't.
+//
+// 1. sale_transaction.sequence_number and the composite natural keys on
+//    store_assortment, transaction_line and tender. conceptual.md defines no
+//    transaction identifier at all (register is out of scope under A2), so a
+//    per-store, per-business-date sequence is introduced here as the natural
+//    key. Revisit if the business already has a different receipt-numbering
+//    scheme. Not ADR-worthy on its own: reversible in one migration.
+//
+// 2. Type lives on transaction_line, not sale_transaction (ADR 0004).
+//    conceptual.md's Modelling decisions section said the transaction "carries
+//    a transaction type", but separately flagged an even exchange — a return
+//    line and a sale line settled in one visit — as "for phase 2 to confirm
+//    rather than assume". A header-level type cannot represent that, so the
+//    type moved to the line. conceptual.md is updated in place to match.
+//
+// 3. transaction_line.store_id is a deliberate denormalization (ADR 0003),
+//    duplicating data reachable from sale_transaction_id. Accepted because it
+//    is what lets invariant I3 be enforced by a composite foreign key instead
+//    of trusted application code. See docs/physical-design.md for the
+//    consistency argument.
+//
+// 4. customer.phone_number (decision D3 in docs/conceptual.md). conceptual.md
+//    left CUSTOMER with no identifying attribute at all — unusable as an
+//    entity. Phone number is the default: the minimum the business already
+//    collects for a receipt lookup or a no-receipt return, chosen because no
+//    loyalty program exists to key off instead (assumption A3).
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Lookups — closed lists the business controls, excluded from entity status
+// in docs/conceptual.md ("A closed list of codes with a name and nothing else
+// is a domain, not an entity"). Modelled as tables with a natural `code` key,
+// not as Enums, because seeds/README.md commits them as editable seed data
+// (seeds/tender_type.csv, seeds/reason_code.csv) — the DBML convention reserves
+// Enum for a set a store manager cannot add to.
+// ---------------------------------------------------------------------------
+
+Table unit_of_measure {
+  code text [pk, note: 'Natural key. EACH for unit items; a weight unit (LB, KG, OZ) for items sold by weight.']
+  name text [not null, note: 'Business-facing name of the unit.']
+
+  Note: 'The unit a product is sold in. Named as excluded from entity status in docs/conceptual.md; kept as a lookup because transaction_line.quantity is meaningless without it.'
+}
+
+Table tender_type {
+  code text [pk, note: 'Natural key, e.g. CASH, CARD, GIFT_CARD, EBT, CHEQUE.']
+  name text [not null, note: 'Business-facing name of the tender type.']
+
+  Note: 'Closed list of settlement methods (docs/glossary.md: tender). A lookup, not an entity, per docs/conceptual.md. Committed as seed data: seeds/tender_type.csv.'
+}
+
+Table movement_reason {
+  code text [pk, note: 'Natural key, e.g. SALE, RETURN, RECEIPT, TRANSFER, SHRINK, ADJUSTMENT, SALVAGE.']
+  name text [not null, note: 'Business-facing name of the reason.']
+
+  Note: 'Closed list of reasons a stock movement happened (docs/glossary.md: inventory movement). A lookup, not an entity, per docs/conceptual.md. Committed as seed data: seeds/reason_code.csv.'
+}
+
+Table condition_code {
+  code text [pk, note: 'Natural key, e.g. RESALABLE, DAMAGED, DESTROYED, CLAIMS_HOLD.']
+  name text [not null, note: 'Business-facing name of the condition.']
+
+  Note: '''Closed list of conditions a returned item can be found in. Condition decides where a return's goods go - back to shelf, to salvage, to a claims hold, or nowhere if destroyed at the counter (docs/conceptual.md, Modelling decisions). A lookup, not an entity.'''
+}
+
+// ---------------------------------------------------------------------------
+// Core entities — the eight from docs/conceptual.md.
+// ---------------------------------------------------------------------------
+
+Table store {
+  id       integer [pk, increment, note: 'Surrogate key. Never exposed to the business.']
+  code     text    [not null, unique, note: 'Operator-facing store number. Stable for the life of the store. Natural key.']
+  name     text    [not null, note: 'Store name as used day to day. Not a legal entity name (docs/glossary.md).']
+  timezone text    [not null, note: '''IANA timezone name (e.g. America/Chicago). Drives sale_transaction.business_date: decision D2 dates a sale to the calendar date at this store's local midnight, not the system clock's.''']
+
+  Note: 'A location that holds stock or processes a sale. Not a legal entity and not a reporting rollup (docs/glossary.md).'
+}
+
+Table product {
+  id                   integer [pk, increment, note: 'Surrogate key.']
+  sku                  text    [not null, unique, note: 'Chain-wide stock keeping unit. Defined once for the whole chain; natural key.']
+  name                 text    [not null, note: 'Product description as shown on shelf tag and receipt.']
+  unit_of_measure_code text    [not null, ref: > unit_of_measure.code, note: 'The unit this product is sold in. Determines whether transaction_line.quantity is a whole number or a weighed fraction.']
+
+  Note: 'An item the retailer sells, defined once for the whole chain. Carries no price and no store - both vary by store and by state (docs/conceptual.md).'
+}
+
+Table store_assortment {
+  store_id     integer       [not null, ref: > store.id, note: 'The store carrying this product.']
+  product_id   integer       [not null, ref: > product.id, note: 'The product carried at this store.']
+  price_amount decimal(10,2) [not null, note: '''Current price this store sells the product at, in USD. Prices vary by store and by state, which is why price lives here and not on product (docs/conceptual.md).''']
+
+  indexes {
+    (store_id, product_id) [pk]
+  }
+
+  Note: '''A product as offered at one store - carried here, at this store's price. Associative entity; the business's own noun for it (docs/conceptual.md). Composite primary key: a store carries a given product at most once.'''
+}
+
+Table customer {
+  id           integer [pk, increment, note: 'Surrogate key. Never exposed to the business.']
+  phone_number text    [not null, unique, note: '''Natural key. The phone number a cashier keys in for a receipt lookup or a no-receipt return - the minimum identifying detail the business already collects, chosen because no loyalty program exists to key off instead (assumption A3; decision D3 in docs/conceptual.md).''']
+
+  Note: 'The party identified on a purchase. Optional throughout - most in-store baskets are anonymous (docs/glossary.md).'
+}
+
+Table sale_transaction {
+  id               integer          [pk, increment, note: 'Surrogate key.']
+  store_id         integer          [not null, ref: > store.id, note: 'Where the checkout happened. Attribution is store-level only - no register, no employee (assumption A2).']
+  customer_id      integer          [ref: > customer.id, note: 'The identified party on this purchase, if any. Nullable: anonymous baskets are the norm in store.']
+  business_date    date             [not null, note: '''The store's local calendar date at settlement (decision D2). Distinct from occurred_at, which is the system timestamp.''']
+  sequence_number  integer          [not null, note: 'Per-store, per-business-date sequence. A phase-2 addition: conceptual.md defines no transaction identifier because register is out of scope (A2). See the phase-2 decisions note at the top of this file.']
+  occurred_at      timestamp        [not null, note: 'System timestamp when the transaction settled (tender accepted). Distinct from business_date.']
+
+  indexes {
+    (store_id, business_date, sequence_number) [unique, note: 'Natural key: a transaction is identified within its store and business day by this sequence.']
+    (id, store_id) [unique, note: '''Supports the composite foreign key from transaction_line that declaratively enforces invariant I3 - a line's assortment belongs to the transaction's store.''']
+  }
+
+  Note: '''A completed checkout: a sale, a return, or an exchange of both in one visit. The only financial header in the model (docs/conceptual.md). Carries no type of its own - each line carries whether it sold or reversed something (ADR 0004) - and no reference to an original transaction, since a return's originals are derived from its lines' reverses_line_id (ADR 0002).'''
+}
+
+Enum line_type {
+  sale
+  return
+}
+
+Table transaction_line {
+  id                  integer       [pk, increment, note: 'Surrogate key.']
+  sale_transaction_id integer       [not null, note: 'The transaction this line belongs to.']
+  line_number         integer       [not null, note: 'Position of this line within its transaction. Natural key together with sale_transaction_id.']
+  store_id            integer       [not null, note: '''Copy of the transaction's store. Carried here rather than looked up, so a composite foreign key can pin this line's assortment to the same store as its transaction - the declarative enforcement of invariant I3, accepted as a denormalization in ADR 0003.''']
+  product_id          integer       [not null, note: 'The product sold or returned on this line.']
+  line_type           line_type     [not null, note: '''Whether this line sold or reversed something. Lives on the line, not the transaction header, so one transaction can hold both types at once - an even exchange - which a header-level type could not represent (ADR 0004, resolving the edge case docs/conceptual.md flagged as open under invariant I4).''']
+  quantity            decimal(10,3) [not null, note: '''Quantity sold or returned, in the product's unit of measure. Weighed items (produce, meat, deli) sell in fractional amounts.''']
+  unit_price_amount   decimal(10,2) [not null, note: '''Price actually charged for this line, in USD, captured at sale time. Never recomputed from the current assortment price, so a refund reverses what was really paid however far the shelf price has since moved (docs/conceptual.md).''']
+  reverses_line_id    integer       [ref: > transaction_line.id, note: 'The original transaction_line this line reverses, if line_type is return. Self-reference, optional: no-receipt returns carry no reference at all (ADR 0002).']
+  condition_code      text          [ref: > condition_code.code, note: 'Condition the returned item was found in. Set only when line_type is return; it decides which inventory_movement(s), if any, this line produces (docs/conceptual.md, Modelling decisions).']
+
+  indexes {
+    (sale_transaction_id, line_number) [unique]
+  }
+
+  Note: 'One item within a transaction. The atom of the business (docs/conceptual.md).'
+}
+
+Table tender {
+  sale_transaction_id integer       [not null, ref: > sale_transaction.id, note: 'The transaction this tender settles.']
+  tender_sequence     integer       [not null, note: 'Position of this tender within its transaction. Natural key together with sale_transaction_id - split tender means more than one row per transaction.']
+  tender_type_code    text          [not null, ref: > tender_type.code, note: 'The means of settlement - cash, card, gift card, EBT, cheque.']
+  amount              decimal(10,2) [not null, note: 'Amount settled by this tender, in USD. Negative on a refund (docs/glossary.md).']
+
+  indexes {
+    (sale_transaction_id, tender_sequence) [pk]
+  }
+
+  Note: 'One means of settlement applied to a transaction. A basket settled by gift card and debit together is two rows, which is why this is an entity and not an amount on the header (docs/glossary.md).'
+}
+
+Table inventory_movement {
+  id                   integer       [pk, increment, note: 'Surrogate key. No natural key beyond it: this is an append-only event ledger, not a thing with a business identity of its own.']
+  store_id             integer       [not null, note: 'The store where stock changed.']
+  product_id           integer       [not null, note: 'The product whose stock changed.']
+  quantity_delta       decimal(10,3) [not null, note: 'Signed change in on-hand quantity. Negative for a sale or shrink, positive for a receipt or a return to shelf. On-hand is the running sum of this column, never a stored position (assumption A4).']
+  movement_reason_code text          [not null, ref: > movement_reason.code, note: 'What caused this movement - sale, return, receipt, transfer, shrink, adjustment, salvage.']
+  transaction_line_id  integer       [ref: > transaction_line.id, note: 'The line that triggered this movement, if any. Nullable: most movements - receipts, transfers, shrink, cycle counts, salvage - have no line behind them (docs/conceptual.md, Modelling decisions).']
+  occurred_at          timestamp     [not null, note: 'When this movement was recorded. Immutable: a correction is another movement, never an edit to this one.']
+
+  Note: 'A single stock change at one store: sale, return, receipt, transfer, shrink, adjustment, salvage. Only some movements originate from a sale (docs/conceptual.md).'
+}
+
+// ---------------------------------------------------------------------------
+// Composite relationships enforcing invariants
+//
+// DBML's inline `ref:` only expresses single-column foreign keys, so the two
+// relationships below are declared explicitly. Both exist to make invariant
+// I3 - a line's assortment belongs to the transaction's store - hold by
+// construction rather than by trusting application code (docs/conceptual.md).
+// Phase 3 needs the supporting unique constraint on sale_transaction
+// (id, store_id), noted on that index above, for the first Ref to be valid SQL.
+// ---------------------------------------------------------------------------
+
+Ref: transaction_line.(sale_transaction_id, store_id) > sale_transaction.(id, store_id)
+Ref: transaction_line.(store_id, product_id) > store_assortment.(store_id, product_id)
+
+// Same discipline extended to inventory_movement: a movement's assortment
+// belongs to the store it changed stock in.
+Ref: inventory_movement.(store_id, product_id) > store_assortment.(store_id, product_id)

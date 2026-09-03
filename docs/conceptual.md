@@ -66,7 +66,7 @@ erDiagram
 | PRODUCT | An item the retailer sells, defined once for the whole chain |
 | STORE_ASSORTMENT | A product as offered at one store - carried here, at this price. *Associative, and the business's own noun for it* |
 | CUSTOMER | A person identified on a purchase. Optional throughout - most in-store baskets are anonymous |
-| SALE_TRANSACTION | A completed checkout: a sale or a return. The transaction itself, and the only financial header in the model |
+| SALE_TRANSACTION | A completed checkout: a sale, a return, or an exchange of both settled together. The transaction itself, and the only financial header in the model. Carries no type of its own - see Modelling decisions and ADR 0004 |
 | TRANSACTION_LINE | One item within a transaction. **The atom of the business.** A returned line may reference the original line it reverses |
 | TENDER | One means of settlement applied to a transaction. Negative on a refund |
 | INVENTORY_MOVEMENT | A single stock change at one store: sale, return, receipt, transfer, shrink, adjustment, salvage. Only some movements originate from a sale |
@@ -150,7 +150,8 @@ another store's price.
 *Enforcement:* declaratively, and phase 2 should shape the keys so that it is.
 Carrying the store on the line lets one composite foreign key point at the
 assortment and another at the transaction, so the database refuses a mismatch
-rather than trusting application code to check it.
+rather than trusting application code to check it. Phase 2 did exactly this;
+the cost is a denormalized `store_id` on the line, accepted in ADR 0003.
 
 **I4. A completed transaction is settled.** At least one TENDER, per the
 cardinality above. Under A3 nothing else in scope can settle a basket.
@@ -166,10 +167,12 @@ to "every *completed* transaction is settled", and the TENDER cardinality
 relaxes to zero-or-many. That consequence is stated in D1 so the reversal is a
 known cost rather than a surprise.
 
-One edge for phase 2 to confirm rather than assume: an even exchange, where a
-returned line and a sold line offset exactly. Real registers still record a
-tender for it, often two that net to zero. If the business says otherwise, I4 is
-the invariant that bends.
+**Resolved in phase 2, by ADR 0004.** An even exchange - a returned line and a
+sold line offsetting in one visit - is one SALE_TRANSACTION whose lines carry
+both types, not a case that strains this invariant. Real registers still
+record a tender for it, often two that net to zero, and I4 holds unchanged:
+the transaction is still settled by at least one tender, regardless of how
+many of its lines are sales versus returns.
 
 ---
 
@@ -244,9 +247,16 @@ remittance is not yet in phase 1 scope.
 
 ## Modelling decisions
 
-**A return is a SALE_TRANSACTION, not a separate entity.** It carries a
-transaction type. Financial records are immutable - we never mutate the original
-sale.
+**A return is a SALE_TRANSACTION, not a separate entity.** Financial records are
+immutable - we never mutate the original sale.
+
+**Type lives on the line, not the header.** *Updated in phase 2 - see ADR
+0004.* Each TRANSACTION_LINE, not the transaction, carries whether it sold or
+reversed something. A header-level type could not represent an even exchange -
+a return line and a sale line settled in one visit - which is exactly the case
+flagged as open below under invariant I4. Putting the type on the line also
+matches how I1 and I2 were already written: both reason about "a sale line"
+and "a return line", not about a transaction's type as a whole.
 
 **Return linkage is at line level, not header level, and the reference is
 optional.** Each returned line optionally references the original line it
@@ -295,13 +305,16 @@ the default at none.
 
 ## Decided without the business
 
-Two questions were open here because they need practice rather than modelling:
-how lanes are used, and how a trading day is closed. Waiting is not free - it
-blocks phase 2 - so both are **decided on a stated default**, with the condition
-that reverses each. This is the same contract as A1 to A5: a position we will
-defend, held only until someone who works a store says otherwise.
+Three questions were open here because they need practice rather than
+modelling: how lanes are used, how a trading day is closed, and - added while
+phase 2 built the logical model and found CUSTOMER unusable without it - how a
+customer is identified at all. Waiting is not free - it blocks phase 2 and, for
+D3, blocked it in fact - so all three are **decided on a stated default**, with
+the condition that reverses each. This is the same contract as A1 to A5: a
+position we will defend, held only until someone who works a store says
+otherwise.
 
-Neither decision is a guess about what stores do. Each takes the reading that
+None of the three is a guess about what stores do. Each takes the reading that
 keeps the model honest if we are wrong: the cheaper error.
 
 **D1. A suspended basket is not recorded in phase 1.** A void before tender
@@ -343,6 +356,28 @@ attribution driven by the actual close of trade. Then business date stops being
 computable from the transaction, and a store-day concept arrives with it - which
 also invalidates A2, since a trading day is per store and per register roll.
 
+**D3. A customer, when identified at all, is identified by phone number.**
+Added in phase 2: CUSTOMER cannot be a usable entity with no identifying
+attribute, and this document did not settle one. No loyalty program exists to
+key off (assumption A3), so phone number is the default - specifically because
+it is what a cashier already keys in today for a receipt lookup or a
+no-receipt return, not a new field invented for this model. CUSTOMER's only
+attribute becomes this phone number; the relationship to SALE_TRANSACTION
+stays exactly as optional as before.
+
+*Why this way round.* The alternative - leaving CUSTOMER attribute-less - is
+not a lesser decision, it is no decision: an entity nothing can ever populate.
+Inventing a fuller identity (name, email, address) would guess at fields
+nobody asked for and take on a privacy-handling surface this phase has no
+reason to open. Phone number is the minimum that makes "identified on a
+purchase" mean something.
+
+*Reversed when* the business adopts a loyalty program, an app account, or any
+identity richer than a phone number. CUSTOMER then gains whatever attributes
+that identity actually carries, phone number likely demotes from key to one
+identifier among several, and A3's loyalty exclusion is what reverses first,
+taking this decision with it.
+
 ---
 
 ## Nothing is open
@@ -355,7 +390,7 @@ That is not the same as being right. The document still says it is done when a
 store manager agrees or corrects us, and no store manager has read it. What
 changed is that their absence no longer blocks the work: every place we guessed
 is labelled as a guess, with what it would cost to unwind. If a manager corrects
-D1, D2 or any assumption, the change is bounded and written down in advance.
+D1, D2, D3 or any assumption, the change is bounded and written down in advance.
 
 ---
 

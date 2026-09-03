@@ -50,8 +50,11 @@ a correct refund computable.
 What becomes harder: answering "which orders does this return reverse?" now
 requires aggregating over the return's items rather than reading one column.
 Whether to also store a header-level convenience reference for the common
-single-receipt case is deliberately left open — it is open question 4 in
-`conceptual.md`, and it is a duplication question, not a modelling one.
+single-receipt case was left open here. It has since been decided against, and
+the reasoning sits under Modelling decisions in `conceptual.md`: a multi-receipt
+return has no single original, so the column would be null or arbitrary in
+exactly the case that matters. It was always a duplication question rather than
+a modelling one.
 
 **We rejected a header-level link.** One reference on the return order cannot
 express a return spanning two receipts, so it would have needed an associative

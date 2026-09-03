@@ -25,10 +25,12 @@ entities that standard is affordable, so it is enforced: a relationship nobody
 can justify in a sentence comes off the diagram.
 
 Four entities that a fuller model would carry - a cart, a reservation, a
-register, a promotion - are absent by **assumption**, not by oversight. Each
-assumption below states the condition that invalidates it. When one is
-invalidated, phase 1 reopens and the entity returns; that is a normal event,
-not a failure. `CONTRIBUTING.md` says going back is expected.
+register, a promotion - are absent by **assumption**, not by oversight. Two
+questions that need store practice rather than modelling are settled by
+**decision**, on a stated default. Every assumption and every decision names the
+condition that reverses it, so nothing here rests on something unwritten. When
+one is reversed, phase 1 reopens and what it deferred returns; that is a normal
+event, not a failure. `CONTRIBUTING.md` says going back is expected.
 
 This document is not done when it looks complete to us. It is done when a store
 manager reads it and either agrees or corrects us.
@@ -157,12 +159,12 @@ cardinality above. Under A3 nothing else in scope can settle a basket.
 a deferred constraint inside the write transaction, since the header is written
 before its tenders exist.
 
-**I4 is coupled to open question 1.** It holds because SALE_TRANSACTION records
-*completed* checkouts. If that question resolves toward suspended baskets being
-transactions with a status, an unsettled row becomes legal and I4 weakens to
-"every *completed* transaction is settled" - a conditional rule of the same
-shape as I1, no longer enforceable by cardinality alone. Worth settling before
-phase 2 builds against the strong form.
+**I4 depends on D1.** It holds because SALE_TRANSACTION records *completed*
+checkouts, which is what D1 decides. If D1 is reversed - a suspended basket
+becomes a transaction with a status - an unsettled row becomes legal, I4 weakens
+to "every *completed* transaction is settled", and the TENDER cardinality
+relaxes to zero-or-many. That consequence is stated in D1 so the reversal is a
+known cost rather than a surprise.
 
 One edge for phase 2 to confirm rather than assume: an even exchange, where a
 returned line and a sold line offset exactly. Real registers still record a
@@ -291,45 +293,69 @@ the default at none.
 
 ---
 
-## Open questions
+## Decided without the business
 
-Neither of these can be settled by modelling. Both need someone who works a
-store: how lanes are actually used, and how a trading day is actually closed.
-Naming who answers is part of the question - an unowned question stays open,
-which is the same reason `docs/glossary.md` insists every term has an owner who
-is not its author.
+Two questions were open here because they need practice rather than modelling:
+how lanes are used, and how a trading day is closed. Waiting is not free - it
+blocks phase 2 - so both are **decided on a stated default**, with the condition
+that reverses each. This is the same contract as A1 to A5: a position we will
+defend, held only until someone who works a store says otherwise.
 
-**1. Are voided and suspended transactions SALE_TRANSACTION instances with a
-status?** A void before tender leaves no financial record and, we think, no row
-- nothing has happened yet. A reversal after tender is a return, not a void. But
-a suspended basket that resumes on another lane is state that outlives the first
-lane, and under A1 this model has nowhere to put it; recording it as an
-unsettled transaction is the alternative to invalidating A1. This is the
-question most likely to move the scope.
+Neither decision is a guess about what stores do. Each takes the reading that
+keeps the model honest if we are wrong: the cheaper error.
 
-*Answered by:* store operations - whoever owns front-end and lane procedure.
-What we need from them is not an opinion on the model but a description of
-practice: does a suspended basket resume on a different lane, how often, and how
-long does it live before it is discarded? *Blocks:* invariant I4 and the TENDER
-cardinality, which hold only while every recorded transaction is a completed
-one.
+**D1. A suspended basket is not recorded in phase 1.** A void before tender
+leaves no row - nothing financial has happened. A reversal after tender is a
+return. And a basket parked mid-scan is, under A1, simply not yet a transaction:
+the shopper walks away or comes back, and the register holds the state until it
+does not. SALE_TRANSACTION continues to mean a *completed* checkout.
 
-**2. When does a store's day end?** `business date` is the trading day a
-transaction is attributed to, in the store's local timezone, and the glossary
-already flags the cutoff as unsettled. Under A2 there is no store-day entity to
-hang it on, so it is an attribute of the transaction and the cutoff is a rule,
-not a row.
+*Why this way round.* The alternative - an unsettled transaction row with a
+status - is the more expensive error if wrong. It legalises rows that no
+invariant can constrain: an unsettled transaction has no tender, so I4 breaks
+for every real transaction in order to accommodate a suspended one, and a
+half-scanned basket would sit in the same table as the financial record of a
+sale. Deferring costs us a feature; admitting it costs us an invariant.
 
-*Answered by:* store operations together with finance - the day that closes is
-both an operational act and an accounting boundary. What we need is the rule as
-practised: the local cutoff time, and which side of it a sale rung at 11:58pm
-belongs to. *Blocks:* the `business date` glossary term, which stays `Draft`
-until this is settled.
+*Reversed when* a suspended basket has to survive being moved between lanes, or
+has to outlive the register that holds it - a shopper resuming at a different
+lane, or a basket parked overnight. Then it becomes a SALE_TRANSACTION carrying
+a status, **not** a cart: it has been scanned and priced, and the glossary puts
+that on the transaction side of the line. I4 weakens at the same moment to
+"every *completed* transaction is settled", and the TENDER cardinality relaxes
+from one-or-many to zero-or-many. Both consequences are written down here so
+that reversal is a small change rather than a rediscovery.
 
-Everything else in this document is a position we have taken and are willing to
-defend. These two are genuinely unknown to us, and the phase-1 done-condition in
-`README.md` - "entities and relationships agreed" - is not met by an engineer
-agreeing with them.
+**D2. The business date is the store's local calendar date at the moment of
+settlement.** Midnight in the store's own timezone is the boundary. A sale rung
+at 11:58pm belongs to that day; one rung at 12:02am belongs to the next.
+
+*Why this way round.* It is deterministic, it needs no store-day entity, and it
+is computable from the transaction alone - which matters because under A2 there
+is nothing else to hang it on. A cutoff driven by store close is what many
+retailers actually use, and it is the more accurate rule, but it cannot be
+derived from a transaction: it requires knowing when that store closed that day,
+which is exactly the store-day entity A2 defers. Choosing local midnight keeps
+the rule inside the model instead of half in a process nobody has written down.
+
+*Reversed when* finance or store operations needs a non-midnight cutoff, or
+attribution driven by the actual close of trade. Then business date stops being
+computable from the transaction, and a store-day concept arrives with it - which
+also invalidates A2, since a trading day is per store and per register roll.
+
+---
+
+## Nothing is open
+
+Every question this document raised is now either a decision above, an
+assumption in A1 to A5, or an invariant in I1 to I4 - each with the condition
+that reverses it. Phase 2 can start against this without waiting for anyone.
+
+That is not the same as being right. The document still says it is done when a
+store manager agrees or corrects us, and no store manager has read it. What
+changed is that their absence no longer blocks the work: every place we guessed
+is labelled as a guess, with what it would cost to unwind. If a manager corrects
+D1, D2 or any assumption, the change is bounded and written down in advance.
 
 ---
 

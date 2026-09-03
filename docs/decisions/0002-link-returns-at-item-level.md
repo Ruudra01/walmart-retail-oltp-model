@@ -60,3 +60,18 @@ entity would carry no information of its own, and it would still lose what
 actually matters: which specific item was returned, in what condition, and at
 what price it was originally sold. It is more structure for strictly less
 information.
+
+## Update, 2026-09-03
+
+Review cut the conceptual model to eight entities and renamed two of them:
+ORDER became SALE_TRANSACTION, and ORDER_ITEM became TRANSACTION_LINE. `ORDER`
+is reserved in ANSI SQL, and an order is placed and later fulfilled whereas a
+checkout completes on tender.
+
+**This decision is unchanged.** Read ORDER as SALE_TRANSACTION and ORDER_ITEM as
+TRANSACTION_LINE throughout the text above; the cardinality quoted from
+`conceptual.md` is now `TRANSACTION_LINE |o--o{ TRANSACTION_LINE : reverses`.
+
+The rename in fact strengthens it: the link is a self-reference inside one
+entity, so item-level linkage costs no associative entity at all, and it
+survives a model with no many-to-many anywhere in it.

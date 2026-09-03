@@ -17,16 +17,22 @@ OLAP team, it is theirs to define.
 
 | Term | Definition | Owner | Status |
 |------|------------|-------|--------|
-| transaction | One ORDER instance — a single sale or a single return, from first item scanned to settlement. A failed payment attempt is not a transaction; it leaves no ORDER | Rushitha Chandaluri | Draft |
-| sale | An ORDER whose type is sale: the whole basket, not one line of it. A single line is an ORDER_ITEM | Rushitha Chandaluri | Draft |
-| void | Cancellation of a line or a whole basket *before* it becomes a financial record. Reversal *after* tender is a return, not a void — the two are different words for different acts. Whether a void leaves an ORDER behind is open question 2 in `conceptual.md` | Rushitha Chandaluri | Draft |
-| return | An ORDER that reverses items previously sold. Each returned ORDER_ITEM *optionally* references the original item it reverses; no-receipt returns carry no reference at all | Rushitha Chandaluri | Draft |
-| trip | One customer's single visit to one store. Not an entity in this model — a trip may produce more than one ORDER (paying twice is two transactions, one trip), and the model does not attempt to group them | Rushitha Chandaluri | Draft |
+| transaction | One SALE_TRANSACTION instance — a single sale or a single return, from first item scanned to settlement. A failed payment attempt is not a transaction; it leaves no row | Rushitha Chandaluri | Draft |
+| sale | A SALE_TRANSACTION whose type is sale: the whole basket, not one line of it. A single line is a TRANSACTION_LINE | Rushitha Chandaluri | Draft |
+| void | Cancellation of a line or a whole basket *before* it becomes a financial record. Reversal *after* tender is a return, not a void — the two are different words for different acts. Whether a void leaves a SALE_TRANSACTION behind is open question 1 in `conceptual.md` | Rushitha Chandaluri | Draft |
+| return | A SALE_TRANSACTION that reverses items previously sold. Each returned TRANSACTION_LINE *optionally* references the original line it reverses, as a self-reference; no-receipt returns carry no reference at all | Rushitha Chandaluri | Draft |
+| trip | One customer's single visit to one store. Not an entity in this model — a trip may produce more than one SALE_TRANSACTION (paying twice is two transactions, one trip), and the model does not attempt to group them | Rushitha Chandaluri | Draft |
 | customer | The identified party associated with a purchase, not merely the party standing at the register. Optional on every relationship: anonymous in-store baskets and guest checkouts have no CUSTOMER | Rushitha Chandaluri | Draft |
-| business date | The trading day an ORDER is attributed to, in the store's own local timezone. Distinct from the system timestamp that records when the row was written; a late-night sale can belong to the prior business date. The end-of-day cutoff is not yet settled | Rushitha Chandaluri | Draft |
+| business date | The trading day a SALE_TRANSACTION is attributed to, in the store's own local timezone. Distinct from the system timestamp that records when the row was written; a late-night sale can belong to the prior business date. The end-of-day cutoff is not yet settled — and under assumption A2 there is no store-day entity to hang it on, so the cutoff is a rule rather than a row | Rushitha Chandaluri | Draft |
 | store | A location that holds stock or processes a sale, physical or virtual. Not a legal entity and not a reporting rollup — both of those are the OLAP team's concern | Rushitha Chandaluri | Draft |
+| tender | One means of settlement applied to a transaction — cash, card, gift card, EBT, cheque. A basket settled by gift card and debit together is two tenders on one transaction, which is why TENDER is an entity and not an amount on the header. Negative on a refund | Rushitha Chandaluri | Draft |
+| assortment | The set of products a given store carries, and the price it carries them at. STORE_ASSORTMENT is one product at one store; price lives here rather than on PRODUCT because prices vary by store and by state | Rushitha Chandaluri | Draft |
+| inventory movement | One stock change at one store: sale, return, receipt, transfer, shrink, cycle-count adjustment, salvage. Immutable — a correction is another movement, never an edit to the one it corrects. On-hand is the signed sum of movements, not a stored number (assumption A4) | Rushitha Chandaluri | Draft |
 
-All eight rows are `Draft` and owned by the author pending review. Ownership
+All eleven rows are `Draft` and owned by the author pending review. The first
+eight are the seeded terms; **tender**, **assortment** and **inventory
+movement** were added when review cut the conceptual model to eight entities and
+made those three words load-bearing. Ownership
 should be reassigned to whoever actually settles each argument — the point of
 the Owner column is that a named person can adjudicate, and the author cannot
 adjudicate against themselves.
@@ -41,3 +47,8 @@ Questions each seeded term has to survive:
 - **customer** — an identified person, or the party at the register?
 - **business date** — when does a store's day end, and in which timezone?
 - **store** — a building, a legal entity, or a reporting unit?
+- **tender** — is an unsuccessful authorisation a tender? Is a refund a
+  negative tender or its own act?
+- **assortment** — does a de-assorted product with stock still on the shelf
+  remain in the assortment?
+- **inventory movement** — is a movement that nets to zero worth recording?

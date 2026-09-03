@@ -45,7 +45,7 @@ erDiagram
     CUSTOMER         |o--o{ SALE_TRANSACTION   : identified-on
 
     SALE_TRANSACTION ||--|{ TRANSACTION_LINE   : contains
-    SALE_TRANSACTION ||--o{ TENDER             : settled-by
+    SALE_TRANSACTION ||--|{ TENDER             : settled-by
 
     STORE_ASSORTMENT ||--o{ TRANSACTION_LINE   : sold-as
     STORE_ASSORTMENT ||--o{ INVENTORY_MOVEMENT : stock-changed-by
@@ -89,11 +89,85 @@ thing.
 | STORE hosts SALE_TRANSACTION | one to many | Every checkout happens somewhere, and store is the unit of attribution under A2 |
 | CUSTOMER identified-on SALE_TRANSACTION | zero-or-one to many | Anonymous baskets are the norm in store, so the transaction cannot require a customer |
 | SALE_TRANSACTION contains TRANSACTION_LINE | one to one-or-many | A transaction with no lines is not a transaction |
-| SALE_TRANSACTION settled-by TENDER | one to zero-or-many | Split tender is routine - gift card plus debit. Zero is possible while a transaction is suspended, and for a basket fully covered by a non-tender adjustment |
-| STORE_ASSORTMENT sold-as TRANSACTION_LINE | one to many | A line sells what that store carries, at that store's price - not an abstract chain product |
+| SALE_TRANSACTION settled-by TENDER | one to one-or-many | A completed checkout is settled, by definition - this entity records completed checkouts only. At least one, because nothing else in scope can settle a basket: non-tender adjustments are out under A3. More than one, because split tender is routine - gift card plus debit |
+| STORE_ASSORTMENT sold-as TRANSACTION_LINE | one to many | A line sells what that store carries, at that store's price - not an abstract chain product. Constrained by invariant I3: the assortment must belong to the same store as the transaction |
 | STORE_ASSORTMENT stock-changed-by INVENTORY_MOVEMENT | one to many | Stock is held per store and per product, which is the assortment grain |
 | TRANSACTION_LINE reverses TRANSACTION_LINE | zero-or-one to many | A returned line optionally references the original it reverses. Optional because no-receipt returns exist; many because one original is returned against repeatedly. See ADR 0002 |
-| TRANSACTION_LINE triggers INVENTORY_MOVEMENT | zero-or-one to many | A sale moves stock, but most movements have no line behind them - and one returned line can produce several movements, or none |
+| TRANSACTION_LINE triggers INVENTORY_MOVEMENT | zero-or-one to many | Most movements have no line behind them, and one returned line can produce several movements or none. The zero side exists for returns only: invariant I1 requires every *sale* line to move stock |
+
+---
+
+## Invariants
+
+Rules that hold over every instance of the model. They are here rather than in
+the diagram because **cardinality cannot express any of them**: two are
+conditional on transaction type, one spans rows, and one relates two entities
+that share no direct relationship. Each names how phase 3 is expected to enforce
+it, because a rule with no enforcement route is a wish.
+
+**I1. Every sale line moves stock, downward.** A TRANSACTION_LINE on a sale
+triggers at least one INVENTORY_MOVEMENT, and the net of those movements against
+the sold assortment is negative. Selling a thing and not reducing what the store
+has is not a state the business can be in.
+
+The line-to-movement relationship stays optional-to-many on the diagram because
+the rule is **conditional on transaction type**, and cardinality cannot say
+"one-or-many when this is a sale, zero-or-many when it is a return". Return
+lines legitimately produce no movement at all - see the condition rule under
+Modelling decisions. *Enforcement:* not a foreign key. Phase 3 enforces it
+inside the write transaction that records the checkout, with a data quality test
+proving no sale line exists without a negative net movement behind it.
+
+**I2. A return cannot exceed what was sold and not yet returned.** For a return
+line referencing an original line, the returned quantity is less than or equal
+to the original quantity minus the sum of every quantity previously returned
+against that same original line. Partial returns accumulate; they do not reset,
+and once a line is fully returned a further return against it is refused rather
+than netted.
+
+One thing this rule deliberately does not say: it does not constrain a return
+line with **no** reference. No-receipt returns carry none by decision, so nothing
+in the model can bound them. That is a known fraud vector rather than an
+oversight, and it is the cost of the optional reference that ADR 0002 accepted
+with open eyes.
+
+*Enforcement:* this is a cross-row aggregate over an append-only table, so no
+CHECK constraint can express it. Phase 3 has two routes and the choice deserves
+an ADR: a trigger that sums prior returns against the referenced line while
+holding a lock on it, or a maintained returned-quantity on the original line
+with a CHECK - which is an accepted denormalisation and carries everything
+`docs/physical-design.md` demands of one, including a test proving the copies
+agree. The trigger is the honest default; the denormalisation is worth choosing
+only if a measurement justifies it.
+
+**I3. A line's assortment belongs to the transaction's store.** The STORE on
+SALE_TRANSACTION and the STORE behind each line's STORE_ASSORTMENT are the same
+store. A basket rung at one store cannot contain another store's assortment, at
+another store's price.
+
+*Enforcement:* declaratively, and phase 2 should shape the keys so that it is.
+Carrying the store on the line lets one composite foreign key point at the
+assortment and another at the transaction, so the database refuses a mismatch
+rather than trusting application code to check it.
+
+**I4. A completed transaction is settled.** At least one TENDER, per the
+cardinality above. Under A3 nothing else in scope can settle a basket.
+
+*Enforcement:* declarative, once phase 2 settles how a one-or-many is enforced -
+a deferred constraint inside the write transaction, since the header is written
+before its tenders exist.
+
+**I4 is coupled to open question 1.** It holds because SALE_TRANSACTION records
+*completed* checkouts. If that question resolves toward suspended baskets being
+transactions with a status, an unsettled row becomes legal and I4 weakens to
+"every *completed* transaction is settled" - a conditional rule of the same
+shape as I1, no longer enforceable by cardinality alone. Worth settling before
+phase 2 builds against the strong form.
+
+One edge for phase 2 to confirm rather than assume: an even exchange, where a
+returned line and a sold line offset exactly. Real registers still record a
+tender for it, often two that net to zero. If the business says otherwise, I4 is
+the invariant that bends.
 
 ---
 
@@ -117,13 +191,19 @@ RESERVATION with them.
 **A2. Attribution is store-level.** So no register and no employee. A
 transaction records where it happened, not which lane rang it or who served it.
 
-*Invalidated when* an event has to name a lane or a person. Three such events
-are already listed in `docs/events.md` - *register opened*, *register closed*,
-*store day closed* - along with *price overridden*, and that document states
-that a model unable to record a listed event is incomplete. **This assumption
-therefore contradicts `docs/events.md` as it stands, and one of the two must
-change in this PR: either those rows are marked out of phase 1, or A2 fails.**
-Till reconciliation and override auditing are the business processes at stake.
+This conflicted with `docs/events.md`, which lists *register opened*, *register
+closed*, *store day closed* and *price overridden*, and states that a model
+unable to record a listed event is incomplete. **Resolved by deferral, not by
+adding entities.** Those four events are recorded in `events.md` as out of phase
+1, each naming the assumption that defers it and the condition that brings it
+back. Till reconciliation and override auditing are real processes, and this is
+not a claim that they do not matter - only that phase 1 does not model them, and
+that both documents now say so instead of one contradicting the other.
+
+*Invalidated when* an event has to name a lane or a person: a till counted per
+register, an override attributed to the associate who authorised it, or a
+Scan & Go basket attributed to a device. Any of those returns REGISTER, and
+override attribution returns EMPLOYEE with it.
 
 **A3. Goods sell at their assortment price.** So no promotion, no category, no
 loyalty accrual. The price on the line is the price the store carries.
@@ -202,6 +282,13 @@ reason to require a customer here.
 **Price belongs to STORE_ASSORTMENT, not PRODUCT.** Prices vary by store and by
 state, for the same reason stock does.
 
+**SALE_TRANSACTION carries no header-level reference to the original
+transaction.** It is derivable from the line links, and storing it is wrong in
+exactly the case that matters: a multi-receipt return has no single original, so
+the column would be null or arbitrary whenever the interesting thing happens.
+Storing it anyway would be a denormalisation, and `docs/physical-design.md` sets
+the default at none.
+
 ---
 
 ## Open questions
@@ -214,13 +301,7 @@ lane, and under A1 this model has nowhere to put it; recording it as an
 unsettled transaction is the alternative to invalidating A1. This is the
 question most likely to move the scope.
 
-**2. Should SALE_TRANSACTION carry a header-level reference to the original
-transaction?** Deriving it from the line links is the default. Storing it is
-wrong in exactly the case that matters - a multi-receipt return has no single
-original, so the column is null or arbitrary whenever the interesting thing
-happens - and it would be a denormalisation needing an ADR.
-
-**3. When does a store's day end?** `business date` is the trading day a
+**2. When does a store's day end?** `business date` is the trading day a
 transaction is attributed to, in the store's local timezone, and the glossary
 already flags the cutoff as unsettled. Under A2 there is no store-day entity to
 hang it on, so it is an attribute of the transaction and the cutoff is a rule,

@@ -293,6 +293,12 @@ the default at none.
 
 ## Open questions
 
+Neither of these can be settled by modelling. Both need someone who works a
+store: how lanes are actually used, and how a trading day is actually closed.
+Naming who answers is part of the question - an unowned question stays open,
+which is the same reason `docs/glossary.md` insists every term has an owner who
+is not its author.
+
 **1. Are voided and suspended transactions SALE_TRANSACTION instances with a
 status?** A void before tender leaves no financial record and, we think, no row
 - nothing has happened yet. A reversal after tender is a return, not a void. But
@@ -301,11 +307,29 @@ lane, and under A1 this model has nowhere to put it; recording it as an
 unsettled transaction is the alternative to invalidating A1. This is the
 question most likely to move the scope.
 
+*Answered by:* store operations - whoever owns front-end and lane procedure.
+What we need from them is not an opinion on the model but a description of
+practice: does a suspended basket resume on a different lane, how often, and how
+long does it live before it is discarded? *Blocks:* invariant I4 and the TENDER
+cardinality, which hold only while every recorded transaction is a completed
+one.
+
 **2. When does a store's day end?** `business date` is the trading day a
 transaction is attributed to, in the store's local timezone, and the glossary
 already flags the cutoff as unsettled. Under A2 there is no store-day entity to
 hang it on, so it is an attribute of the transaction and the cutoff is a rule,
 not a row.
+
+*Answered by:* store operations together with finance - the day that closes is
+both an operational act and an accounting boundary. What we need is the rule as
+practised: the local cutoff time, and which side of it a sale rung at 11:58pm
+belongs to. *Blocks:* the `business date` glossary term, which stays `Draft`
+until this is settled.
+
+Everything else in this document is a position we have taken and are willing to
+defend. These two are genuinely unknown to us, and the phase-1 done-condition in
+`README.md` - "entities and relationships agreed" - is not met by an engineer
+agreeing with them.
 
 ---
 

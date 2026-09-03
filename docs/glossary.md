@@ -17,14 +17,25 @@ OLAP team, it is theirs to define.
 
 | Term | Definition | Owner | Status |
 |------|------------|-------|--------|
-| transaction | | | Draft |
-| sale | | | Draft |
-| void | | | Draft |
-| return | | | Draft |
-| trip | | | Draft |
-| customer | | | Draft |
-| business date | | | Draft |
-| store | | | Draft |
+| transaction | One SALE_TRANSACTION instance — a single sale or a single return, from first item scanned to settlement. A failed payment attempt is not a transaction; it leaves no row | Rushitha Chandaluri | Draft |
+| sale | A SALE_TRANSACTION whose type is sale: the whole basket, not one line of it. A single line is a TRANSACTION_LINE | Rushitha Chandaluri | Draft |
+| void | Cancellation of a line or a whole basket *before* it becomes a financial record. Reversal *after* tender is a return, not a void — the two are different words for different acts. A void before tender leaves no row at all - decision D1 in `conceptual.md`, which also holds that a basket parked mid-scan is not yet a transaction | Rushitha Chandaluri | Draft |
+| return | A SALE_TRANSACTION that reverses items previously sold. Each returned TRANSACTION_LINE *optionally* references the original line it reverses, as a self-reference; no-receipt returns carry no reference at all | Rushitha Chandaluri | Draft |
+| trip | One customer's single visit to one store. Not an entity in this model — a trip may produce more than one SALE_TRANSACTION (paying twice is two transactions, one trip), and the model does not attempt to group them | Rushitha Chandaluri | Draft |
+| customer | The identified party associated with a purchase, not merely the party standing at the register. Optional on every relationship: anonymous in-store baskets and guest checkouts have no CUSTOMER | Rushitha Chandaluri | Draft |
+| business date | The store's local calendar date at the moment of settlement, midnight to midnight in the store's own timezone. A sale rung at 11:58pm belongs to that day; one rung at 12:02am belongs to the next. Distinct from the system timestamp recording when the row was written. Decision D2 in `conceptual.md` - a cutoff driven by the actual close of trade is the more accurate rule but is not computable from the transaction alone, so it waits for the store-day concept that A2 defers | Rushitha Chandaluri | Draft |
+| store | A location that holds stock or processes a sale, physical or virtual. Not a legal entity and not a reporting rollup — both of those are the OLAP team's concern | Rushitha Chandaluri | Draft |
+| tender | One means of settlement applied to a transaction — cash, card, gift card, EBT, cheque. A basket settled by gift card and debit together is two tenders on one transaction, which is why TENDER is an entity and not an amount on the header. Negative on a refund | Rushitha Chandaluri | Draft |
+| assortment | The set of products a given store carries, and the price it carries them at. STORE_ASSORTMENT is one product at one store; price lives here rather than on PRODUCT because prices vary by store and by state | Rushitha Chandaluri | Draft |
+| inventory movement | One stock change at one store: sale, return, receipt, transfer, shrink, cycle-count adjustment, salvage. Immutable — a correction is another movement, never an edit to the one it corrects. On-hand is the signed sum of movements, not a stored number (assumption A4) | Rushitha Chandaluri | Draft |
+
+All eleven rows are `Draft` and owned by the author pending review. The first
+eight are the seeded terms; **tender**, **assortment** and **inventory
+movement** were added when review cut the conceptual model to eight entities and
+made those three words load-bearing. Ownership
+should be reassigned to whoever actually settles each argument — the point of
+the Owner column is that a named person can adjudicate, and the author cannot
+adjudicate against themselves.
 
 Questions each seeded term has to survive:
 
@@ -36,3 +47,8 @@ Questions each seeded term has to survive:
 - **customer** — an identified person, or the party at the register?
 - **business date** — when does a store's day end, and in which timezone?
 - **store** — a building, a legal entity, or a reporting unit?
+- **tender** — is an unsuccessful authorisation a tender? Is a refund a
+  negative tender or its own act?
+- **assortment** — does a de-assorted product with stock still on the shelf
+  remain in the assortment?
+- **inventory movement** — is a movement that nets to zero worth recording?

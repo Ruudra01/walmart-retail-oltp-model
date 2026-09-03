@@ -15,6 +15,10 @@ schemaspy/output/
 __pycache__/
 .venv/
 
+# Node (docs/erd/generate.js's dependencies). package-lock.json is committed
+# on purpose, for reproducible renders - see docs/erd/README.md.
+node_modules/
+
 # macOS
 .DS_Store
 
@@ -23,3 +27,7 @@ __pycache__/
 # explicitly so a future data/ or image rule cannot quietly swallow them.
 !seeds/
 !docs/erd/
+
+# ...except the intermediate SVG docs/erd/generate.js writes on its way to
+# erd.png - a build byproduct, not the rendered diagram itself.
+docs/erd/erd.svg

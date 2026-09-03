@@ -103,9 +103,13 @@ thing.
 
 Rules that hold over every instance of the model. They are here rather than in
 the diagram because **cardinality cannot express any of them**: two are
-conditional on transaction type, one spans rows, and one relates two entities
-that share no direct relationship. Each names how phase 3 is expected to enforce
-it, because a rule with no enforcement route is a wish.
+conditional on transaction type, one spans rows, one relates two entities that
+share no direct relationship, one is a computation that must freeze at the
+moment of sale, and one is a temporal-containment rule. I5 and I6 were added in
+phase 2, once the attributes they depend on existed - the same way I1 to I4 were
+written against the entities agreed here, not invented ahead of them. Each names
+how phase 3 is expected to enforce it, because a rule with no enforcement route
+is a wish.
 
 **I1. Every sale line moves stock, downward.** A TRANSACTION_LINE on a sale
 triggers at least one INVENTORY_MOVEMENT, and the net of those movements against
@@ -173,6 +177,43 @@ both types, not a case that strains this invariant. Real registers still
 record a tender for it, often two that net to zero, and I4 holds unchanged:
 the transaction is still settled by at least one tender, regardless of how
 many of its lines are sales versus returns.
+
+**I5. A line's tax reflects whether its product is taxable, at the store's
+rate, at the moment of sale.** *Added in phase 2, once STORE and PRODUCT
+carried the attributes this depends on.* Not every product is taxed - groceries
+are typically exempt, prepared food is not (assumption A5) - and the rate is
+set per store, standing in for jurisdiction since STORE is not modelled below
+the state level. A non-taxable product's line carries no tax. A taxable
+product's line carries tax computed from its store's rate, captured once at
+sale time and never revisited - the same treatment as the price on the line,
+and for the same reason: a rate change or a reclassification of a product's
+taxability must never rewrite a completed sale.
+
+This is not a relationship cardinality could show even in principle - it is a
+computation reaching across PRODUCT and STORE whose result must freeze at the
+instant of sale rather than track either entity afterward. *Enforcement:* not
+a foreign key. Phase 3 enforces the "non-taxable product implies zero tax"
+half inside the write transaction, the same way I1 enforces that a sale line
+moves stock; the amount itself is written once by the application and never
+recomputed by the database, for the same reason the price is.
+
+**I6. A line only sells what its store was actively carrying on that date.**
+*Added in phase 2, once STORE_ASSORTMENT carried a period rather than only a
+current price.* A TRANSACTION_LINE's business date must fall on or after the
+date its store started carrying that assortment, and before the date it
+stopped, if it ever did. A store cannot sell what it had not yet started
+carrying, or what it had already stopped carrying.
+
+*Enforcement:* not a foreign key - a temporal-containment rule no plain
+constraint expresses on its own. Phase 3 has two routes, and the choice
+deserves an ADR the same way I2's does: a trigger checking the line's business
+date against its assortment's carried period at write time, or a Postgres
+`EXCLUDE` constraint if the carried period becomes a range type instead of two
+dates. Either way, `tests/data_quality/` needs a test proving no line was sold
+outside its assortment's active period. Note the limitation this invariant
+inherits from STORE_ASSORTMENT's key: a product de-assorted and later
+re-assorted at the same store has only one carried period representable, not
+one per gap - see the Note on `store_assortment` in `model/schema.dbml`.
 
 ---
 
@@ -282,6 +323,11 @@ one or more movements, and not always positive ones.
 **Prices are captured as sold, never recomputed.** A line holds what was
 actually paid, so a refund reverses the real amount however far the shelf price
 has moved since.
+
+**Tax is captured as charged, never recomputed.** *Added in phase 2, with
+invariant I5.* The same treatment as price, for the same reason: a line holds
+the tax actually charged, so a refund reverses the real amount however far the
+store's rate or the product's taxability has moved since.
 
 **Weighed items sell in fractional quantities.** Produce, meat and deli sell by
 weight, so quantity is not always a whole number. The business fact belongs
@@ -405,10 +451,12 @@ scheduling - any store grouping above STORE, such as region, district or
 banner, because those are reporting rollups and rollups are the OLAP team's.
 
 Excluded as attributes or lookups rather than entities: transaction type, tender
-type, condition code, movement reason, unit of measure. A closed list of codes
-with a name and nothing else is a domain, not an entity. If one ever acquires
-history of its own - a tender type whose fees change over time - it graduates,
-and that is a change to this document, not a quiet one to the DDL.
+type, condition code, movement reason, unit of measure, and - added in phase 2,
+once STORE needed one - state. A closed list of codes with a name and nothing
+else is a domain, not an entity. If one ever acquires history of its own - a
+tender type whose fees change over time, or tax-by-jurisdiction reaching state
+in a way A5 already predicts might happen - it graduates, and that is a change
+to this document, not a quiet one to the DDL.
 
 Also excluded: `outbox_event`. Reliable event publication is an implementation
 mechanism, not a business entity - a store manager has never heard of it. It is

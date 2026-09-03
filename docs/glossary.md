@@ -26,7 +26,7 @@ OLAP team, it is theirs to define.
 | business date | The store's local calendar date at the moment of settlement, midnight to midnight in the store's own timezone. A sale rung at 11:58pm belongs to that day; one rung at 12:02am belongs to the next. Distinct from the system timestamp recording when the row was written. Decision D2 in `conceptual.md` - a cutoff driven by the actual close of trade is the more accurate rule but is not computable from the transaction alone, so it waits for the store-day concept that A2 defers | Rushitha Chandaluri | Draft |
 | store | A location that holds stock or processes a sale, physical or virtual. Not a legal entity and not a reporting rollup — both of those are the OLAP team's concern | Rushitha Chandaluri | Draft |
 | tender | One means of settlement applied to a transaction — cash, card, gift card, EBT, cheque. A basket settled by gift card and debit together is two tenders on one transaction, which is why TENDER is an entity and not an amount on the header. Negative on a refund | Rushitha Chandaluri | Draft |
-| assortment | The set of products a given store carries, and the price it carries them at. STORE_ASSORTMENT is one product at one store; price lives here rather than on PRODUCT because prices vary by store and by state | Rushitha Chandaluri | Draft |
+| assortment | The set of products a given store carries, and the price it carries them at, for as long as it carries them. STORE_ASSORTMENT is one product at one store; price lives here rather than on PRODUCT because prices vary by store and by state. A de-assorted product does not leave the table - it gets an end date (carried_to); remaining shelf stock is tracked separately, by inventory movement, not by this row (invariant I6). One limitation carried forward rather than solved: this only represents one carry period per store-product pair, not a re-assort after a gap | Rushitha Chandaluri | Draft |
 | inventory movement | One stock change at one store: sale, return, receipt, transfer, shrink, cycle-count adjustment, salvage. Immutable — a correction is another movement, never an edit to the one it corrects. On-hand is the signed sum of movements, not a stored number (assumption A4) | Rushitha Chandaluri | Draft |
 
 All eleven rows are `Draft` and owned by the author pending review. The first
@@ -50,5 +50,8 @@ Questions each seeded term has to survive:
 - **tender** — is an unsuccessful authorisation a tender? Is a refund a
   negative tender or its own act?
 - **assortment** — does a de-assorted product with stock still on the shelf
-  remain in the assortment?
+  remain in the assortment? *Answered in phase 2: no - carried_to ends
+  membership regardless of remaining stock, which is tracked separately by
+  inventory movement. Still Draft because that's a schema answer, not a
+  business-language agreement the glossary owner has confirmed.*
 - **inventory movement** — is a movement that nets to zero worth recording?

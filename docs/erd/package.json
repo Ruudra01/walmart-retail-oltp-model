@@ -1,0 +1,12 @@
+{
+  "name": "erd-generator",
+  "private": true,
+  "description": "Renders model/schema.dbml to erd.png. Run `npm install && node generate.js` from this directory. See README.md.",
+  "scripts": {
+    "render": "node generate.js"
+  },
+  "dependencies": {
+    "@dbml/core": "^10.1.1",
+    "sharp": "^0.35.4"
+  }
+}

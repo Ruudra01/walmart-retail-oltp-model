@@ -17,16 +17,16 @@ OLAP team, it is theirs to define.
 
 | Term | Definition | Owner | Status |
 |------|------------|-------|--------|
-| transaction | One SALE_TRANSACTION instance — a single sale or a single return, from first item scanned to settlement. A failed payment attempt is not a transaction; it leaves no row | Rushitha Chandaluri | Draft |
-| sale | A SALE_TRANSACTION whose type is sale: the whole basket, not one line of it. A single line is a TRANSACTION_LINE | Rushitha Chandaluri | Draft |
+| transaction | One SALE_TRANSACTION instance — a single sale, a single return, or an exchange of both settled together, from first item scanned to settlement. A failed payment attempt is not a transaction; it leaves no row | Rushitha Chandaluri | Draft |
+| sale | A SALE_TRANSACTION whose lines are all sale-typed: the whole basket, not one line of it. A single sold line is a TRANSACTION_LINE with line_type sale; the transaction header carries no type of its own (ADR 0004) | Rushitha Chandaluri | Draft |
 | void | Cancellation of a line or a whole basket *before* it becomes a financial record. Reversal *after* tender is a return, not a void — the two are different words for different acts. A void before tender leaves no row at all - decision D1 in `conceptual.md`, which also holds that a basket parked mid-scan is not yet a transaction | Rushitha Chandaluri | Draft |
-| return | A SALE_TRANSACTION that reverses items previously sold. Each returned TRANSACTION_LINE *optionally* references the original line it reverses, as a self-reference; no-receipt returns carry no reference at all | Rushitha Chandaluri | Draft |
+| return | A SALE_TRANSACTION whose lines are all return-typed, reversing items previously sold. A transaction with both return-typed and sale-typed lines is an exchange, not a return (ADR 0004). Each returned TRANSACTION_LINE *optionally* references the original line it reverses, as a self-reference; no-receipt returns carry no reference at all | Rushitha Chandaluri | Draft |
 | trip | One customer's single visit to one store. Not an entity in this model — a trip may produce more than one SALE_TRANSACTION (paying twice is two transactions, one trip), and the model does not attempt to group them | Rushitha Chandaluri | Draft |
-| customer | The identified party associated with a purchase, not merely the party standing at the register. Optional on every relationship: anonymous in-store baskets and guest checkouts have no CUSTOMER | Rushitha Chandaluri | Draft |
+| customer | The identified party associated with a purchase, not merely the party standing at the register. Identified by phone number, the minimum the business already collects for a receipt lookup or a no-receipt return - there is no loyalty program to key off instead (decision D3 in `conceptual.md`). Optional on every relationship: anonymous in-store baskets and guest checkouts have no CUSTOMER | Rushitha Chandaluri | Draft |
 | business date | The store's local calendar date at the moment of settlement, midnight to midnight in the store's own timezone. A sale rung at 11:58pm belongs to that day; one rung at 12:02am belongs to the next. Distinct from the system timestamp recording when the row was written. Decision D2 in `conceptual.md` - a cutoff driven by the actual close of trade is the more accurate rule but is not computable from the transaction alone, so it waits for the store-day concept that A2 defers | Rushitha Chandaluri | Draft |
 | store | A location that holds stock or processes a sale, physical or virtual. Not a legal entity and not a reporting rollup — both of those are the OLAP team's concern | Rushitha Chandaluri | Draft |
 | tender | One means of settlement applied to a transaction — cash, card, gift card, EBT, cheque. A basket settled by gift card and debit together is two tenders on one transaction, which is why TENDER is an entity and not an amount on the header. Negative on a refund | Rushitha Chandaluri | Draft |
-| assortment | The set of products a given store carries, and the price it carries them at. STORE_ASSORTMENT is one product at one store; price lives here rather than on PRODUCT because prices vary by store and by state | Rushitha Chandaluri | Draft |
+| assortment | The set of products a given store carries, and the price it carries them at, for as long as it carries them. STORE_ASSORTMENT is one product at one store; price lives here rather than on PRODUCT because prices vary by store and by state. A de-assorted product does not leave the table - it gets an end date (carried_to); remaining shelf stock is tracked separately, by inventory movement, not by this row (invariant I6). One limitation carried forward rather than solved: this only represents one carry period per store-product pair, not a re-assort after a gap | Rushitha Chandaluri | Draft |
 | inventory movement | One stock change at one store: sale, return, receipt, transfer, shrink, cycle-count adjustment, salvage. Immutable — a correction is another movement, never an edit to the one it corrects. On-hand is the signed sum of movements, not a stored number (assumption A4) | Rushitha Chandaluri | Draft |
 
 All eleven rows are `Draft` and owned by the author pending review. The first
@@ -50,5 +50,8 @@ Questions each seeded term has to survive:
 - **tender** — is an unsuccessful authorisation a tender? Is a refund a
   negative tender or its own act?
 - **assortment** — does a de-assorted product with stock still on the shelf
-  remain in the assortment?
+  remain in the assortment? *Answered in phase 2: no - carried_to ends
+  membership regardless of remaining stock, which is tracked separately by
+  inventory movement. Still Draft because that's a schema answer, not a
+  business-language agreement the glossary owner has confirmed.*
 - **inventory movement** — is a movement that nets to zero worth recording?

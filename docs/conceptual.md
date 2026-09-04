@@ -66,7 +66,7 @@ erDiagram
 | PRODUCT | An item the retailer sells, defined once for the whole chain |
 | STORE_ASSORTMENT | A product as offered at one store - carried here, at this price. *Associative, and the business's own noun for it* |
 | CUSTOMER | A person identified on a purchase. Optional throughout - most in-store baskets are anonymous |
-| SALE_TRANSACTION | A completed checkout: a sale or a return. The transaction itself, and the only financial header in the model |
+| SALE_TRANSACTION | A completed checkout: a sale, a return, or an exchange of both settled together. The transaction itself, and the only financial header in the model. Carries no type of its own - see Modelling decisions and ADR 0004 |
 | TRANSACTION_LINE | One item within a transaction. **The atom of the business.** A returned line may reference the original line it reverses |
 | TENDER | One means of settlement applied to a transaction. Negative on a refund |
 | INVENTORY_MOVEMENT | A single stock change at one store: sale, return, receipt, transfer, shrink, adjustment, salvage. Only some movements originate from a sale |
@@ -103,9 +103,13 @@ thing.
 
 Rules that hold over every instance of the model. They are here rather than in
 the diagram because **cardinality cannot express any of them**: two are
-conditional on transaction type, one spans rows, and one relates two entities
-that share no direct relationship. Each names how phase 3 is expected to enforce
-it, because a rule with no enforcement route is a wish.
+conditional on transaction type, one spans rows, one relates two entities that
+share no direct relationship, one is a computation that must freeze at the
+moment of sale, and one is a temporal-containment rule. I5 and I6 were added in
+phase 2, once the attributes they depend on existed - the same way I1 to I4 were
+written against the entities agreed here, not invented ahead of them. Each names
+how phase 3 is expected to enforce it, because a rule with no enforcement route
+is a wish.
 
 **I1. Every sale line moves stock, downward.** A TRANSACTION_LINE on a sale
 triggers at least one INVENTORY_MOVEMENT, and the net of those movements against
@@ -150,7 +154,8 @@ another store's price.
 *Enforcement:* declaratively, and phase 2 should shape the keys so that it is.
 Carrying the store on the line lets one composite foreign key point at the
 assortment and another at the transaction, so the database refuses a mismatch
-rather than trusting application code to check it.
+rather than trusting application code to check it. Phase 2 did exactly this;
+the cost is a denormalized `store_id` on the line, accepted in ADR 0003.
 
 **I4. A completed transaction is settled.** At least one TENDER, per the
 cardinality above. Under A3 nothing else in scope can settle a basket.
@@ -166,10 +171,49 @@ to "every *completed* transaction is settled", and the TENDER cardinality
 relaxes to zero-or-many. That consequence is stated in D1 so the reversal is a
 known cost rather than a surprise.
 
-One edge for phase 2 to confirm rather than assume: an even exchange, where a
-returned line and a sold line offset exactly. Real registers still record a
-tender for it, often two that net to zero. If the business says otherwise, I4 is
-the invariant that bends.
+**Resolved in phase 2, by ADR 0004.** An even exchange - a returned line and a
+sold line offsetting in one visit - is one SALE_TRANSACTION whose lines carry
+both types, not a case that strains this invariant. Real registers still
+record a tender for it, often two that net to zero, and I4 holds unchanged:
+the transaction is still settled by at least one tender, regardless of how
+many of its lines are sales versus returns.
+
+**I5. A line's tax reflects whether its product is taxable, at the store's
+rate, at the moment of sale.** *Added in phase 2, once STORE and PRODUCT
+carried the attributes this depends on.* Not every product is taxed - groceries
+are typically exempt, prepared food is not (assumption A5) - and the rate is
+set per store, standing in for jurisdiction since STORE is not modelled below
+the state level. A non-taxable product's line carries no tax. A taxable
+product's line carries tax computed from its store's rate, captured once at
+sale time and never revisited - the same treatment as the price on the line,
+and for the same reason: a rate change or a reclassification of a product's
+taxability must never rewrite a completed sale.
+
+This is not a relationship cardinality could show even in principle - it is a
+computation reaching across PRODUCT and STORE whose result must freeze at the
+instant of sale rather than track either entity afterward. *Enforcement:* not
+a foreign key. Phase 3 enforces the "non-taxable product implies zero tax"
+half inside the write transaction, the same way I1 enforces that a sale line
+moves stock; the amount itself is written once by the application and never
+recomputed by the database, for the same reason the price is.
+
+**I6. A line only sells what its store was actively carrying on that date.**
+*Added in phase 2, once STORE_ASSORTMENT carried a period rather than only a
+current price.* A TRANSACTION_LINE's business date must fall on or after the
+date its store started carrying that assortment, and before the date it
+stopped, if it ever did. A store cannot sell what it had not yet started
+carrying, or what it had already stopped carrying.
+
+*Enforcement:* not a foreign key - a temporal-containment rule no plain
+constraint expresses on its own. Phase 3 has two routes, and the choice
+deserves an ADR the same way I2's does: a trigger checking the line's business
+date against its assortment's carried period at write time, or a Postgres
+`EXCLUDE` constraint if the carried period becomes a range type instead of two
+dates. Either way, `tests/data_quality/` needs a test proving no line was sold
+outside its assortment's active period. Note the limitation this invariant
+inherits from STORE_ASSORTMENT's key: a product de-assorted and later
+re-assorted at the same store has only one carried period representable, not
+one per gap - see the Note on `store_assortment` in `model/schema.dbml`.
 
 ---
 
@@ -244,9 +288,16 @@ remittance is not yet in phase 1 scope.
 
 ## Modelling decisions
 
-**A return is a SALE_TRANSACTION, not a separate entity.** It carries a
-transaction type. Financial records are immutable - we never mutate the original
-sale.
+**A return is a SALE_TRANSACTION, not a separate entity.** Financial records are
+immutable - we never mutate the original sale.
+
+**Type lives on the line, not the header.** *Updated in phase 2 - see ADR
+0004.* Each TRANSACTION_LINE, not the transaction, carries whether it sold or
+reversed something. A header-level type could not represent an even exchange -
+a return line and a sale line settled in one visit - which is exactly the case
+flagged as open below under invariant I4. Putting the type on the line also
+matches how I1 and I2 were already written: both reason about "a sale line"
+and "a return line", not about a transaction's type as a whole.
 
 **Return linkage is at line level, not header level, and the reference is
 optional.** Each returned line optionally references the original line it
@@ -273,6 +324,11 @@ one or more movements, and not always positive ones.
 actually paid, so a refund reverses the real amount however far the shelf price
 has moved since.
 
+**Tax is captured as charged, never recomputed.** *Added in phase 2, with
+invariant I5.* The same treatment as price, for the same reason: a line holds
+the tax actually charged, so a refund reverses the real amount however far the
+store's rate or the product's taxability has moved since.
+
 **Weighed items sell in fractional quantities.** Produce, meat and deli sell by
 weight, so quantity is not always a whole number. The business fact belongs
 here; precision, rounding and unit-of-measure handling are logical concerns.
@@ -295,13 +351,16 @@ the default at none.
 
 ## Decided without the business
 
-Two questions were open here because they need practice rather than modelling:
-how lanes are used, and how a trading day is closed. Waiting is not free - it
-blocks phase 2 - so both are **decided on a stated default**, with the condition
-that reverses each. This is the same contract as A1 to A5: a position we will
-defend, held only until someone who works a store says otherwise.
+Three questions were open here because they need practice rather than
+modelling: how lanes are used, how a trading day is closed, and - added while
+phase 2 built the logical model and found CUSTOMER unusable without it - how a
+customer is identified at all. Waiting is not free - it blocks phase 2 and, for
+D3, blocked it in fact - so all three are **decided on a stated default**, with
+the condition that reverses each. This is the same contract as A1 to A5: a
+position we will defend, held only until someone who works a store says
+otherwise.
 
-Neither decision is a guess about what stores do. Each takes the reading that
+None of the three is a guess about what stores do. Each takes the reading that
 keeps the model honest if we are wrong: the cheaper error.
 
 **D1. A suspended basket is not recorded in phase 1.** A void before tender
@@ -343,6 +402,28 @@ attribution driven by the actual close of trade. Then business date stops being
 computable from the transaction, and a store-day concept arrives with it - which
 also invalidates A2, since a trading day is per store and per register roll.
 
+**D3. A customer, when identified at all, is identified by phone number.**
+Added in phase 2: CUSTOMER cannot be a usable entity with no identifying
+attribute, and this document did not settle one. No loyalty program exists to
+key off (assumption A3), so phone number is the default - specifically because
+it is what a cashier already keys in today for a receipt lookup or a
+no-receipt return, not a new field invented for this model. CUSTOMER's only
+attribute becomes this phone number; the relationship to SALE_TRANSACTION
+stays exactly as optional as before.
+
+*Why this way round.* The alternative - leaving CUSTOMER attribute-less - is
+not a lesser decision, it is no decision: an entity nothing can ever populate.
+Inventing a fuller identity (name, email, address) would guess at fields
+nobody asked for and take on a privacy-handling surface this phase has no
+reason to open. Phone number is the minimum that makes "identified on a
+purchase" mean something.
+
+*Reversed when* the business adopts a loyalty program, an app account, or any
+identity richer than a phone number. CUSTOMER then gains whatever attributes
+that identity actually carries, phone number likely demotes from key to one
+identifier among several, and A3's loyalty exclusion is what reverses first,
+taking this decision with it.
+
 ---
 
 ## Nothing is open
@@ -355,7 +436,7 @@ That is not the same as being right. The document still says it is done when a
 store manager agrees or corrects us, and no store manager has read it. What
 changed is that their absence no longer blocks the work: every place we guessed
 is labelled as a guess, with what it would cost to unwind. If a manager corrects
-D1, D2 or any assumption, the change is bounded and written down in advance.
+D1, D2, D3 or any assumption, the change is bounded and written down in advance.
 
 ---
 
@@ -370,10 +451,12 @@ scheduling - any store grouping above STORE, such as region, district or
 banner, because those are reporting rollups and rollups are the OLAP team's.
 
 Excluded as attributes or lookups rather than entities: transaction type, tender
-type, condition code, movement reason, unit of measure. A closed list of codes
-with a name and nothing else is a domain, not an entity. If one ever acquires
-history of its own - a tender type whose fees change over time - it graduates,
-and that is a change to this document, not a quiet one to the DDL.
+type, condition code, movement reason, unit of measure, and - added in phase 2,
+once STORE needed one - state. A closed list of codes with a name and nothing
+else is a domain, not an entity. If one ever acquires history of its own - a
+tender type whose fees change over time, or tax-by-jurisdiction reaching state
+in a way A5 already predicts might happen - it graduates, and that is a change
+to this document, not a quiet one to the DDL.
 
 Also excluded: `outbox_event`. Reliable event publication is an implementation
 mechanism, not a business entity - a store manager has never heard of it. It is
